@@ -50,7 +50,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // Fitur Approval Cuti (BARU)
         Route::get('/leaves', [AdminController::class, 'getLeaveRequests']);      // Lihat daftar
         Route::put('/leaves/{id}', [AdminController::class, 'updateLeaveStatus']); // Setujui/Tolak
-        
+
+        Route::get('/karyawan', [AdminController::class, 'getAllemployees']);
+        Route::post('/karyawan', [AdminController::class, 'addEmployee']);
+        Route::delete('/karyawan/{id}', [AdminController::class, 'deleteEmployee']);
     });
 
 });

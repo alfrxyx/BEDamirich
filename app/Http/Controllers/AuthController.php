@@ -8,42 +8,46 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
+// ... (namespace dan use statement tetap sama)
+
 class AuthController extends Controller
 {
-    // === FUNCTION REGISTRASI (SUDAH DIPERBAIKI) ===
     public function register(Request $request)
     {
-        // 1. Validasi Input
+        // 1. CEGAH REGISTRASI EMAIL ADMIN
+        if ($request->email === 'admin@kantor.com') {
+            return response()->json([
+                'message' => 'Email ini khusus untuk Admin dan tidak bisa didaftarkan manual.'
+            ], 403);
+        }
+
         $validator = Validator::make($request->all(), [
             'nama' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8|confirmed',
-            // Validasi tambahan
             'divisi_id' => 'required',
-            'posisi_id' => 'required',
             'tanggal_masuk' => 'required|date',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validasi gagal',
-                'errors' => $validator->errors()
-            ], 422);
+            return response()->json(['message' => 'Validasi gagal', 'errors' => $validator->errors()], 422);
         }
 
         try {
-            // 2. Simpan SEMUA data ke tabel Users (Sesuai yang kita perbaiki tadi)
+            // 2. PAKSA SEMUA PENDAFTAR JADI KARYAWAN BIASA (ID 2)
+            // Jadi meskipun dia pilih "Admin" di dropdown (kalau ada),
+            // sistem akan tetap memaksa dia jadi "Staff".
+            $posisiStaff = 2; 
+
             $user = User::create([
                 'name' => $request->nama,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
-                // Data tambahan ini sekarang masuk ke tabel users
                 'divisi_id' => $request->divisi_id,
-                'posisi_id' => $request->posisi_id,
+                'posisi_id' => $posisiStaff, // <--- KUNCI PENGAMAN
                 'tanggal_masuk' => $request->tanggal_masuk,
             ]);
 
-            // 3. Generate Token agar user langsung login
             $token = $user->createToken('auth_token')->plainTextToken;
 
             return response()->json([
@@ -54,11 +58,7 @@ class AuthController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            // Jika masih error, tampilkan pesan aslinya biar gampang didiagnosa
-            return response()->json([
-                'message' => 'Terjadi kesalahan server.',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(['message' => 'Terjadi kesalahan server.', 'error' => $e->getMessage()], 500);
         }
     }
 

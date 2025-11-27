@@ -2,16 +2,35 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Absensi extends Model
 {
+    use HasFactory;
+
     protected $fillable = [
-        'karyawan_id', 'tanggal', 'jam_masuk', 'jam_pulang',
-        'metode', 'latitude', 'longitude', 'foto_selfie', 'status'
+        // --- PASTIKAN USER_ID ADA DI SINI ---
+        'user_id',      // <--- INI WAJIB ADA!
+        'karyawan_id',
+        // ------------------------------------
+        'tanggal',
+        'jam_masuk',
+        'jam_pulang',
+        'status',
+        'metode',
+        'latitude',
+        'longitude',
+        'foto_masuk',
+        'foto_pulang',
+        'keterangan'
     ];
 
-    // Relasi balik ke Karyawan
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
     public function karyawan()
     {
         return $this->belongsTo(Karyawan::class);

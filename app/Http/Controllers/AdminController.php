@@ -6,9 +6,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use App\Models\AttendanceToken; 
 use App\Models\LeaveRequest; 
+use App\Models\User;
+use App\Models\Absensi;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 
 class AdminController extends Controller
 {
@@ -16,14 +19,28 @@ class AdminController extends Controller
     // FITUR 1: DASHBOARD & STATISTIK
     // ==========================================
 
-    public function dashboardHarian(): JsonResponse
+        public function dashboardHarian(): JsonResponse
     {
+        $today = Carbon::today()->toDateString();
+
+        // 1. Hitung Total Karyawan (Kecuali Admin ID 1)
+        $totalEmployees = User::where('posisi_id', '!=', 1)->count();
+
+        // 2. Hitung Yang Sudah Absen Hari Ini
+        $presentToday = Absensi::whereDate('tanggal', $today)->count();
+
+        // 3. Hitung Yang Terlambat Hari Ini
+        // Kita hitung berdasarkan status 'Terlambat' yang disimpan saat absen
+        $lateEntries = Absensi::whereDate('tanggal', $today)
+                              ->where('status', 'Terlambat')
+                              ->count();
+
         return response()->json([
             'message' => 'Data dashboard admin berhasil dimuat',
             'stats' => [
-                'total_employees' => 150, 
-                'present_today' => 140,   
-                'late_entries' => 5,
+                'total_employees' => $totalEmployees, 
+                'present_today' => $presentToday,   
+                'late_entries' => $lateEntries,
             ]
         ]);
     }
@@ -110,6 +127,83 @@ class AdminController extends Controller
         return response()->json([
             'success' => true,
             'data' => $formattedRequests
+        ]);
+    }
+
+    public function getAllEmployees()
+    {
+        // Ambil user yang posisinya BUKAN Admin (ID 1)
+        // Kita load juga relasi divisinya biar nama divisinya muncul
+        $employees = User::where('posisi_id', '!=', 1)
+                         ->with('divisi') 
+                         ->orderBy('created_at', 'desc')
+                         ->get();
+
+        return response()->json([
+            'message' => 'Data karyawan berhasil diambil',
+            'data' => $employees
+        ]);
+    }
+
+    // 2. Tambah Karyawan Baru
+    public function addEmployee(Request $request)
+    {
+        // Validasi Input
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'password' => 'required|string|min:6',
+            'divisi_id' => 'required|exists:divisis,id',
+            'tanggal_masuk' => 'required|date',
+        ]);
+
+        try {
+            // GENERATE TOKEN OTOMATIS DI SINI
+            // Token ini permanen untuk user tersebut
+            $permanentToken = (string) Str::uuid();
+
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'divisi_id' => $request->divisi_id,
+                'posisi_id' => 2, // Default: Staff (Karyawan Biasa)
+                'tanggal_masuk' => $request->tanggal_masuk,
+                'attendance_token' => $permanentToken, // <--- INI KUNCINYA
+            ]);
+
+            return response()->json([
+                'message' => 'Karyawan berhasil ditambahkan!',
+                'data' => $user
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Gagal menambah karyawan', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    // ... kode sebelumnya ...
+
+    // 3. Hapus Karyawan
+    public function deleteEmployee($id)
+    {
+        // Cari user
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json(['message' => 'Data karyawan tidak ditemukan'], 404);
+        }
+
+        // PENTING: Cegah menghapus akun Admin Utama (ID 1) atau sesama Admin
+        if ($user->posisi_id === 1) {
+            return response()->json(['message' => 'DILARANG: Anda tidak bisa menghapus akun Admin!'], 403);
+        }
+
+        // Hapus User
+        $user->delete();
+
+        return response()->json([
+            'message' => 'Karyawan berhasil dihapus secara permanen.'
         ]);
     }
 
