@@ -6,6 +6,8 @@ use App\Models\LeaveRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
+use App\Models\Notification;
+use App\Models\User;
 
 class LeaveRequestController extends Controller
 {
@@ -99,6 +101,18 @@ class LeaveRequestController extends Controller
                 'status' => 'pending',
             ]);
 
+            $admins = User::where('posisi_id', 1)->get();
+            foreach ($admins as $admin) {
+                Notification::create([
+                    'user_id' => $admin->id,
+                    'title' => 'Pengajuan Cuti Baru',
+                    'message' => $user->name . ' mengajukan cuti dari ' . $startDate . ' hingga ' . $endDate . '.',
+                    'type' => 'leave_request',
+                    'is_read' => false,
+                ]);
+            }
+            
+
             \Log::info('Leave Request Store - Success', ['leave_request_id' => $leaveRequest->id]);
 
             return response()->json([
@@ -123,10 +137,45 @@ class LeaveRequestController extends Controller
     }
 
     /**
+ * Mendapatkan daftar notifikasi untuk user yang sedang login
+ */
+public function getNotifications()
+{
+    $user = Auth::user();
+    if (!$user) {
+        return response()->json(['message' => 'Unauthorized.'], 401);
+    }
+
+    // Ambil notifikasi yang belum dibaca dan sudah dibaca, urutkan berdasarkan waktu terbaru
+    $notifications = Notification::where('user_id', $user->id)
+                                ->orderBy('created_at', 'desc')
+                                ->get();
+
+    // Format ulang agar lebih rapi
+    $formatted = $notifications->map(function ($notif) {
+        return [
+            'id' => $notif->id,
+            'title' => $notif->title,
+            'message' => $notif->message,
+            'type' => $notif->type,
+            'is_read' => $notif->is_read,
+            'created_at' => $notif->created_at->diffForHumans(), // contoh: "2 jam lalu"
+            'read_at' => $notif->read_at ? $notif->read_at->format('d/m/Y H:i') : null,
+        ];
+    });
+
+    return response()->json([
+        'success' => true,
+        'data' => $formatted,
+        'total_unread' => $notifications->where('is_read', false)->count(),
+    ]);
+}
+
+    /**
      * Membatalkan permohonan cuti (hanya jika statusnya pending).
      */
     public function destroy($id)
-    {
+    {   
         $user = Auth::user();
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 401);

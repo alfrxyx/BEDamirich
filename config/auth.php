@@ -27,6 +27,11 @@ return [
             // Karena yang melakukan login adalah Model User.
             'provider' => 'users', 
         ],
+
+        'api' => [
+            'driver' => 'sanctum',
+            'provider' => 'users',
+        ],
     ],
 
     /*

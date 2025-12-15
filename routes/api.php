@@ -7,7 +7,8 @@ use App\Http\Controllers\AbsensiController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\LeaveRequestController; 
+use App\Http\Controllers\LeaveRequestController;
+use App\Http\Controllers\NotificationController; 
 
 /*
 |--------------------------------------------------------------------------
@@ -26,7 +27,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
-
+    Route::get('/admin/laporan', [AdminController::class, 'getRekapLaporan']);
+    
     // --- KARYAWAN ---
     Route::get('/profile', [ProfileController::class, 'show']);
     Route::post('/profile/update', [ProfileController::class, 'update']);
@@ -35,6 +37,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/absensi/clock-in', [AbsensiController::class, 'clockIn']);
     Route::post('/absensi/clock-out', [AbsensiController::class, 'clockOut']);
     Route::get('/absensi/riwayat', [AbsensiController::class, 'riwayat']);
+
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::put('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::put('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 
     Route::apiResource('leave-request', LeaveRequestController::class)->only(['index', 'store', 'destroy']);
 
@@ -47,13 +53,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/rekap-semua', [AdminController::class, 'rekapSemua']);
         Route::post('/generate-token', [AdminController::class, 'generateAttendanceToken']);
 
-        // Fitur Approval Cuti (BARU)
-        Route::get('/leaves', [AdminController::class, 'getLeaveRequests']);      // Lihat daftar
-        Route::put('/leaves/{id}', [AdminController::class, 'updateLeaveStatus']); // Setujui/Tolak
+        // Fitur Approval Cuti
+        Route::get('/leaves', [AdminController::class, 'getLeaveRequests']);      
+        Route::put('/leaves/{id}', [AdminController::class, 'updateLeaveStatus']); 
 
+        // Manajemen Karyawan
         Route::get('/karyawan', [AdminController::class, 'getAllemployees']);
         Route::post('/karyawan', [AdminController::class, 'addEmployee']);
         Route::delete('/karyawan/{id}', [AdminController::class, 'deleteEmployee']);
-    });
 
+        // ⭐ TAMBAHKAN INI - Absensi Hari Ini
+        Route::get('/attendances/today', [AdminController::class, 'getTodayAttendances']);
+        
+        Route::get('/laporan/export-pdf', [AdminController::class, 'exportLaporanPDF']);    
+    });
 });

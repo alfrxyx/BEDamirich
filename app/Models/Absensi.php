@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class Absensi extends Model
 {
     use HasFactory;
-
+    protected $table = 'absensis'; // Sesuaikan dengan nama tabel Anda
     protected $fillable = [
         // --- PASTIKAN USER_ID ADA DI SINI ---
         'user_id',      // <--- INI WAJIB ADA!
@@ -28,6 +28,7 @@ class Absensi extends Model
 
     public function user()
     {
+        return $this->belongsTo(User::class, 'user_id');
         return $this->belongsTo(User::class);
     }
 

@@ -76,6 +76,21 @@ class AbsensiController extends Controller
             'status' => $statusKehadiran, // <--- STATUS DISIMPAN DISINI
         ]);
 
+        // Tambahkan DI DALAM block try{} di method clockIn(), setelah $newAttendance dibuat
+
+        if ($statusKehadiran === 'Terlambat') {
+            $admins = \App\Models\User::where('posisi_id', 1)->get();
+            foreach ($admins as $admin) {
+                \App\Models\Notification::create([
+                    'user_id' => $admin->id,
+                    'title' => 'Karyawan Terlambat',
+                    'message' => $user->name . ' terlambat masuk pada ' . $sekarang->toDateString() . '. Jam masuk: ' . $sekarang->format('H:i'),
+                    'type' => 'late_attendance',
+                    'is_read' => false,
+                ]);
+            }
+        }
+
         // Pesan dinamis
         $pesan = $statusKehadiran === 'Terlambat' 
             ? 'Absen berhasil, tapi Anda terlambat (Lewat 09:30).' 

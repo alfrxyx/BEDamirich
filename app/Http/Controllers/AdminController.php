@@ -12,6 +12,8 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Barryvdh\DomPDF\Facade\Pdf;
+use App\Models\Notification;
 
 class AdminController extends Controller
 {
@@ -130,6 +132,146 @@ class AdminController extends Controller
         ]);
     }
 
+        /**
+ * GET /api/admin/attendances/today
+ * Mendapatkan daftar absensi karyawan hari ini
+ */
+public function getTodayAttendances(): JsonResponse
+{
+    $today = Carbon::today()->toDateString();
+    
+    $attendances = Absensi::with(['user.divisi'])
+        ->whereDate('tanggal', $today)
+        ->orderBy('jam_masuk', 'asc')
+        ->get()
+        ->map(function($absensi) {
+            $jamMasuk = Carbon::parse($absensi->jam_masuk);
+            $batasWaktu = Carbon::parse('09:00:00');
+            
+            // DEBUG - Log untuk lihat nilai
+            \Log::info('DEBUG Absensi', [
+                'nama' => $absensi->user->name ?? 'Unknown',
+                'jam_masuk' => $absensi->jam_masuk,
+                'jam_masuk_carbon' => $jamMasuk->toTimeString(),
+                'batas_waktu' => $batasWaktu->toTimeString(),
+                'diff_minutes' => $jamMasuk->diffInMinutes($batasWaktu),
+                'is_late' => $jamMasuk->greaterThan($batasWaktu)
+            ]);
+            
+            $isLate = $absensi->status === 'Terlambat' || $jamMasuk->greaterThan($batasWaktu);
+            $statusLabel = $isLate ? 'late' : 'on_time';
+            
+            $keterangan = '';
+            if ($isLate) {
+                // PERBAIKAN: Gunakan absolute value
+                $totalMenit = abs(round($jamMasuk->diffInMinutes($batasWaktu)));
+                
+                if ($totalMenit >= 60) {
+                    $jam = floor($totalMenit / 60);
+                    $menit = $totalMenit % 60;
+                    $keterangan = "Terlambat {$jam} jam {$menit} menit";
+                } else {
+                    $keterangan = "Terlambat {$totalMenit} menit";
+                }
+            }
+            
+            return [
+                'id' => $absensi->id,
+                'karyawan' => [
+                    'nama' => $absensi->user ? $absensi->user->name : 'Unknown User',
+                    'divisi' => [
+                        'nama' => $absensi->user && $absensi->user->divisi 
+                            ? $absensi->user->divisi->nama 
+                            : '-'
+                    ]
+                ],
+                'tanggal' => $absensi->tanggal,
+                'jam_masuk' => $absensi->jam_masuk,
+                'status' => $statusLabel,
+                'keterangan' => $keterangan
+            ];
+        });
+
+    return response()->json([
+        'message' => 'Data absensi hari ini berhasil dimuat',
+        'data' => $attendances
+    ]);
+}
+    public function exportLaporanPDF(Request $request)
+    {
+        $request->validate([
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'type' => 'required|in:absensi,cuti'
+        ]);
+
+        $startDate = Carbon::parse($request->start_date)->startOfDay();
+        $endDate = Carbon::parse($request->end_date)->endOfDay();
+        $type = $request->type;
+
+        // Ambil Data
+        if ($type === 'absensi') {
+            $data = Absensi::with('user.divisi')
+                ->whereBetween('tanggal', [$startDate, $endDate])
+                ->orderBy('tanggal', 'desc')
+                ->orderBy('jam_masuk', 'asc')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'tanggal' => Carbon::parse($item->tanggal)->format('d/m/Y'),
+                        'nama' => $item->user ? $item->user->name : 'Unknown',
+                        'divisi' => $item->user && $item->user->divisi ? $item->user->divisi->nama : '-',
+                        'jam_masuk' => $item->jam_masuk ? Carbon::parse($item->jam_masuk)->format('H:i') : '-',
+                        'jam_pulang' => $item->jam_pulang ? Carbon::parse($item->jam_pulang)->format('H:i') : 'Belum Pulang',
+                        'status' => $item->status ?? '-',
+                        'durasi' => $this->hitungDurasi($item->jam_masuk, $item->jam_pulang)
+                    ];
+                });
+
+            $title = 'Laporan Absensi Karyawan';
+        } else {
+            $data = LeaveRequest::with('user')
+                ->whereBetween('start_date', [$startDate, $endDate])
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'tanggal' => Carbon::parse($item->start_date)->format('d/m/Y') . ' - ' . Carbon::parse($item->end_date)->format('d/m/Y'),
+                        'nama' => $item->user ? $item->user->name : 'Unknown',
+                        'divisi' => $item->user && $item->user->divisi ? $item->user->divisi->nama : '-',
+                        'jenis' => ucfirst($item->type),
+                        'alasan' => $item->reason,
+                        'status' => $item->status === 'approved' ? 'Disetujui' : ($item->status === 'rejected' ? 'Ditolak' : 'Menunggu')
+                    ];
+                });
+
+            $title = 'Laporan Cuti Karyawan';
+        }
+
+        // Data untuk PDF
+        $pdfData = [
+            'title' => $title,
+            'type' => $type,
+            'data' => $data,
+            'periode' => $startDate->format('d/m/Y') . ' s/d ' . $endDate->format('d/m/Y'),
+            'tanggal_cetak' => Carbon::now()->format('d/m/Y H:i'),
+            'dicetak_oleh' => Auth::user()->name ?? 'Admin'
+        ];
+
+        // Generate PDF
+        $pdf = Pdf::loadView('pdf.laporan-absensi', $pdfData)
+                ->setPaper('a4', 'landscape')
+                ->setOptions([
+                    'defaultFont' => 'sans-serif',
+                    'isRemoteEnabled' => true
+                ]);
+
+        // Download PDF
+        $filename = strtolower(str_replace(' ', '-', $title)) . '-' . $startDate->format('Ymd') . '-' . $endDate->format('Ymd') . '.pdf';
+        
+        return $pdf->download($filename);
+    }
+
     public function getAllEmployees()
     {
         // Ambil user yang posisinya BUKAN Admin (ID 1)
@@ -208,30 +350,147 @@ class AdminController extends Controller
     }
 
     public function updateLeaveStatus(Request $request, $id)
-    {
-        $user = Auth::user();
-        
-        // Cek Admin (Konsisten pakai posisi_id di tabel Users)
-        if ((int)$user->posisi_id !== 1) {
-            return response()->json(['message' => 'Akses ditolak.'], 403);
-        }
-
-        $request->validate([
-            'status' => 'required|in:approved,rejected'
-        ]);
-
-        $leaveRequest = LeaveRequest::find($id);
-
-        if (!$leaveRequest) {
-            return response()->json(['message' => 'Data cuti tidak ditemukan'], 404);
-        }
-
-        $leaveRequest->status = $request->status;
-        $leaveRequest->save();
-
-        return response()->json([
-            'message' => 'Status permohonan berhasil diperbarui menjadi ' . $request->status,
-            'data' => $leaveRequest
-        ]);
+{
+    $user = Auth::user();
+    
+    if ((int)$user->posisi_id !== 1) {
+        return response()->json(['message' => 'Akses ditolak.'], 403);
     }
+
+    $request->validate([
+        'status' => 'required|in:approved,rejected'
+    ]);
+
+    $leaveRequest = LeaveRequest::with('user')->find($id);
+
+    if (!$leaveRequest) {
+        return response()->json(['message' => 'Data cuti tidak ditemukan'], 404);
+    }
+
+    $leaveRequest->status = $request->status;
+    $leaveRequest->save();
+
+    // 🔔 INI YANG WAJIB ADA — KIRIM NOTIFIKASI KE USER
+    $statusLabel = $request->status === 'approved' ? 'Disetujui' : 'Ditolak';
+    \App\Models\Notification::create([
+        'user_id' => $leaveRequest->user_id,
+        'title' => 'Permohonan Cuti ' . $statusLabel,
+        'message' => 'Permohonan cuti Anda dari ' . $leaveRequest->start_date . ' hingga ' . $leaveRequest->end_date . ' telah ' . strtolower($statusLabel) . '.',
+        'type' => 'leave_status_update',
+        'is_read' => false,
+    ]);
+
+    return response()->json([
+        'message' => 'Status permohonan berhasil diperbarui menjadi ' . $statusLabel,
+        'data' => $leaveRequest
+    ]);
+}
+
+    // ... kode-kode sebelumnya ...
+
+    // ==========================================
+    // FITUR 5: LAPORAN / REKAP DATA (SESUAI DIAGRAM)
+    // ==========================================
+
+    public function getRekapLaporan(Request $request)
+{
+    \Log::info('=== START getRekapLaporan ===', [
+        'start_date' => $request->start_date,
+        'end_date' => $request->end_date,
+        'type' => $request->type,
+        'user_id' => Auth::id()
+    ]);
+
+    try {
+        // Validasi Input Filter
+        $request->validate([
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'type' => 'required|in:absensi,cuti'
+        ]);
+
+        $startDate = Carbon::parse($request->start_date)->startOfDay();
+        $endDate = Carbon::parse($request->end_date)->endOfDay();
+
+        // Ambil Data Absensi
+        if ($request->type === 'absensi') {
+            $data = Absensi::with('user')
+                ->whereBetween('tanggal', [$startDate, $endDate])
+                ->orderBy('tanggal', 'desc')
+                ->orderBy('jam_masuk', 'asc')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'tanggal' => $item->tanggal,
+                        'nama_karyawan' => $item->user ? $item->user->name : 'Unknown User',
+                        'jam_masuk' => $item->jam_masuk,
+                        'jam_pulang' => $item->jam_pulang,
+                        'status' => $item->status,
+                        'keterangan' => $this->hitungDurasi($item->jam_masuk, $item->jam_pulang)
+                    ];
+                });
+
+            // Jika tidak ada data
+            if ($data->isEmpty()) {
+                return response()->json([
+                    'message' => 'Tidak ada data absensi pada periode ini.',
+                    'data' => []
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Data laporan absensi berhasil diambil',
+                'data' => $data
+            ]);
+
+        } else {
+            // Laporan Cuti: Ambil data cuti dalam periode
+            $data = LeaveRequest::with('user')
+                ->whereBetween('start_date', [$startDate, $endDate])
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'tanggal' => $item->start_date . ' s/d ' . $item->end_date, // Rentang tanggal cuti
+                        'nama_karyawan' => $item->user ? $item->user->name : 'Unknown',
+                        'jam_masuk' => $item->type, // Gunakan kolom ini untuk "Jenis Cuti"
+                        'jam_pulang' => $item->reason, // Gunakan untuk "Alasan"
+                        'status' => $item->status === 'approved' ? 'Disetujui' : ($item->status === 'rejected' ? 'Ditolak' : 'Menunggu'),
+                        'keterangan' => '' // Kosongkan, karena info sudah di kolom lain
+                    ];
+                });
+
+            return response()->json([
+                'message' => 'Data laporan cuti berhasil diambil',
+                'data' => $data
+            ]);
+        }
+
+    } catch (\Exception $e) {
+        \Log::error('ERROR in getRekapLaporan:', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        return response()->json([
+            'message' => 'Terjadi kesalahan internal server.',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+// Helper hitung durasi kerja (optional, untuk mempercantik laporan)
+private function hitungDurasi($masuk, $pulang) {
+    if (!$masuk) return '-';
+    if (!$pulang) return 'Belum Pulang';
+
+    try {
+        $start = Carbon::parse($masuk);
+        $end = Carbon::parse($pulang);
+        $diff = $start->diff($end);
+        return $diff->format('%H Jam %I Menit');
+    } catch (\Exception $e) {
+        return '-';
+    }
+}
 }
