@@ -9,14 +9,15 @@ class Divisi extends Model
 {
     use HasFactory;
 
-    protected $table = 'divisis';
+    // ✅ PERBAIKAN: Ubah nama tabel menjadi 'divisi' (tanpa 's')
+    protected $table = 'divisi';
     
-    // Lindungi id, sisanya boleh diisi massal
-    protected $guarded = ['id'];
+    // ✅ PERBAIKAN: Gunakan $fillable untuk keamanan
+    protected $fillable = ['name'];
 
-    // Relasi: Satu Divisi punya banyak Karyawan
-    public function karyawans()
+    // ✅ PERBAIKAN: Relasi ke User (bukan Karyawan)
+    public function users()
     {
-        return $this->hasMany(Karyawan::class);
+        return $this->hasMany(User::class, 'divisi_id');
     }
 }
